@@ -1409,7 +1409,7 @@ const TD_NET = (function () {
                     if (manualBox.checked) { renderJoinManual(); } else { join("auto", roomInput.value); }
                 } }, manualBox.checked ? "Join with a code…" : "Join"),
                 manualRow,
-                el("p", { class: "mpNote" }, "The cars of both players are shared. Traffic and pedestrians are separate on each phone."),
+                el("p", { class: "mpNote" }, "Cars, traffic and pedestrians are shared (the host phone runs them). Police are still separate on each phone."),
                 close
             );
             if (s === "error") { body.querySelector("h2").after(errorBox); }
@@ -5559,9 +5559,18 @@ function TD_boot() {
     // [S40] LAN multiplayer hooks used by the traffic code below (filled in by section [S40]).
     //   guest = this phone is the GUEST: it does not simulate normal traffic, it only draws the host's cars ("mirror" cars).
     //   vehicle = the other player's car (same object as mp.vehicle).
-    const mpHub = { guest: TD_NET.connected && TD_NET.role !== "host", vehicle: null };
+    const mpHub = { guest: TD_NET.connected && TD_NET.role !== "host", vehicle: null, pedsShared: true };
     let mpSpawnSpec = null;      // {ci, pidx}: make rQ() build this exact car model/paint
     let mpForceSpawn = false;    // make rQ() skip the distance checks (the mirror car is moved right after)
+    // the other player's car if they are connected and recently seen, otherwise null
+    function mpPedRemote() {
+        const v = mpHub.vehicle;
+        return v && !v.off ? v : null;
+    }
+    // true on the guest phone while the host's pedestrians replace our own
+    function mpGuestPeds() {
+        return mpHub.guest && mpHub.pedsShared;
+    }
     // distance to the NEAREST player (host world spawns and recycles traffic around both players)
     function mpDistToPlayers(x, z) {
         let d = Math.hypot(x - car.x, z - car.z);
@@ -7301,6 +7310,7 @@ function TD_boot() {
                 I.model = look.model;
                 I.height = look.height;
                 I.active = false;
+                I.pid = yQ.length;     // [S40] id used in the multiplayer messages
                 yQ.push(I);
             }
         };
@@ -7649,15 +7659,24 @@ function TD_boot() {
         A.respawnAt = 0;
     }
     function wD(A) {
-        const B = car.x;
-        const g = car.z;
+        let B = car.x;
+        let g = car.z;
+        const mpR = mpPedRemote();      // [S40] the other player (peds also spawn around them)
         const w = TA * TA;
         const P = hA * hA;
         let Q = false;
         for (let A = pedestrians.length - 1; A >= 0; A--) {
             const w = pedestrians[A];
-            const D = w.spawnX - B;
-            const C = w.spawnZ - g;
+            let D = w.spawnX - B;
+            let C = w.spawnZ - g;
+            if (mpR) {
+                const D2 = w.spawnX - mpR.x;
+                const C2 = w.spawnZ - mpR.z;
+                if (D2 * D2 + C2 * C2 < D * D + C * C) {
+                    D = D2;
+                    C = C2;
+                }
+            }
             if (D * D + C * C > P) {
                 w.active = false;
                 if (w.dead) {
@@ -7673,8 +7692,16 @@ function TD_boot() {
             if (A.active || A.dead || A.respawnAt > $Q) {
                 continue;
             }
-            const P = A.spawnX - B;
-            const Q = A.spawnZ - g;
+            let P = A.spawnX - B;
+            let Q = A.spawnZ - g;
+            if (mpR) {
+                const P2 = A.spawnX - mpR.x;
+                const Q2 = A.spawnZ - mpR.z;
+                if (P2 * P2 + Q2 * Q2 < P * P + Q * Q) {
+                    P = P2;
+                    Q = Q2;
+                }
+            }
             const C = P * P + Q * Q;
             if (C <= w) {
                 D.push({ p: A, d2: C });
@@ -7691,6 +7718,10 @@ function TD_boot() {
             }
         }
         {
+            if (mpR && Math.random() < 0.5) {
+                B = mpR.x;      // this time place a new pedestrian around the other player
+                g = mpR.z;
+            }
             const w = Math.round(0.6 * yA);
             let D = A ? 99 : 3;
             if (pedestrians.length < w && PD.length) {
@@ -7744,7 +7775,9 @@ function TD_boot() {
         }
     }
     const PD = FA.filter(A => 2 !== A.d);
-    wD(true);
+    if (!mpGuestPeds()) {
+        wD(true);
+    }
     beginPedDraw();
     pedestrians.forEach((A, B) => BD(A, B, 0.48));
     endPedDraw();
@@ -8201,7 +8234,9 @@ function TD_boot() {
         mQ -= A;
         if (mQ <= 0) {
             mQ = 0.12;
-            wD();
+            if (!mpGuestPeds()) {
+                wD();       // [S40] the guest does not spawn pedestrians: the host owns them
+            }
         }
         TQ.clear();
         hQ.clear();
@@ -8235,6 +8270,15 @@ function TD_boot() {
                 BD(Q, P, undefined === Q.deathBaseY ? 0.48 : Q.deathBaseY);
                 Q._slot = P;
                 B(XQ, LQ(Q.x, Q.z), Q);
+                continue;
+            }
+            if (Q.mirror) {
+                mpPedMirrorStep(Q, A);      // [S40] guest: follow the host's snapshots
+                Q._slot = P;
+                B(XQ, LQ(Q.x, Q.z), Q);
+                if (Q.onRoad) {
+                    B(TQ, LQ(Q.x, Q.z), Q);
+                }
                 continue;
             }
             let D;
@@ -10312,6 +10356,12 @@ function TD_boot() {
         else if (msg.t === "tr") {
             mpOnTraffic(msg);
         }
+        else if (msg.t === "pd") {
+            mpOnPeds(msg);
+        }
+        else if (msg.t === "ph") {
+            mpOnPedHit(msg);
+        }
         else if (msg.t === "bye") {
             mpRemoveRemote();
         }
@@ -10408,6 +10458,8 @@ function TD_boot() {
             return;
         }
         mpHub.guest = on;
+        mpHub.pedsShared = true;
+        mpPedsRemove(!on);      // on: our own pedestrians are removed (the host's replace them); off: the mirrors are removed
         if (on) {
             for (const c of xw.slice()) {
                 if (!c.cop && !c.mirror) {
@@ -10493,6 +10545,162 @@ function TD_boot() {
         for (const wheel of w.wh) {
             wheel.m.rotation.x += w.v * dt / wheel.r;
         }
+    }
+
+    // ---- [S40] SHARED PEDESTRIANS (host is the boss) ----------------------------------
+    // Both phones build the same pool of pedestrians (same seed), so a pedestrian is identified by its place in the pool (pid).
+    // HOST: runs the pedestrians as before (spawning around both players, 50 at most) and ten times a second sends every
+    //       active one:  { t: "pd", n: pool size, sig: pool fingerprint, c: [[pid, x, z, heading, flags], ...] }
+    //       flags: 1 moving, 2 running, 4 talking, 8 dead, 16 fell on the right side, 32 on the road
+    // GUEST: does not spawn pedestrians; each pedestrian in the message becomes a "mirror" (a pool pedestrian that follows the host).
+    //       If the pools do not match (n / sig), the guest simply keeps its own pedestrians (pedsShared = false).
+    // Running someone over on the guest: the guest shows it at once and tells the host ({ t: "ph", id }), which makes it dead for both.
+    let mpPedSigCache = null;
+    function mpPedSig() {
+        if (mpPedSigCache === null) {
+            let s = 0;
+            for (let i = 0; i < yQ.length; i++) {
+                s += (yQ[i].model + 1) * ((i % 13) + 1) + 3 * (yQ[i].paletteIndex | 0);
+            }
+            mpPedSigCache = s;
+        }
+        return mpPedSigCache;
+    }
+    function mpSendPeds() {
+        if (!TD_NET.connected || TD_NET.role !== "host" || !mp.remote) {
+            return;
+        }
+        const list = [];
+        for (const p of pedestrians) {
+            if (p.mirror || p.pid === undefined) {
+                continue;
+            }
+            const f = (p.moving ? 1 : 0) | (p.run ? 2 : 0) | (p.talk ? 4 : 0) | (p.dead ? 8 : 0) | (p.dead && p.deathSide > 0 ? 16 : 0) | (p.onRoad ? 32 : 0);
+            list.push([p.pid, mpRound(p.x, 20), mpRound(p.z, 20), mpRound(p.heading || 0, 100), f]);
+        }
+        TD_NET.send({ t: "pd", n: yQ.length, sig: mpPedSig(), c: list }, true);
+    }
+    // take pedestrians out of the world (all of ours, or only the mirrors)
+    function mpPedsRemove(onlyMirrors) {
+        for (let i = pedestrians.length - 1; i >= 0; i--) {
+            const p = pedestrians[i];
+            if (onlyMirrors && !p.mirror) {
+                continue;
+            }
+            p.active = false;
+            p.mirror = 0;
+            if (p.dead) {
+                p.dead = false;
+                p.respawnAt = $Q + 45;
+            }
+            pedestrians.splice(i, 1);
+        }
+    }
+    function mpOnPeds(msg) {
+        if (!mpGuestPeds() || !Array.isArray(msg.c)) {
+            return;
+        }
+        if (msg.n !== yQ.length || msg.sig !== mpPedSig()) {
+            mpHub.pedsShared = false;          // the two phones built different pedestrian pools: keep our own pedestrians
+            mpPedsRemove(true);
+            console.warn("[multiplayer] pedestrian pools differ - pedestrians are not shared");
+            return;
+        }
+        const now = performance.now();
+        for (const e of msg.c) {
+            if (!Array.isArray(e) || e.length < 5) {
+                continue;
+            }
+            const p = yQ[e[0] | 0];
+            if (!p) {
+                continue;
+            }
+            const f = e[4] | 0;
+            if (!p.mirror || pedestrians.indexOf(p) < 0) {
+                gD(p);                          // reset it like a normal spawn, then put it where the host has it
+                p.active = true;
+                p.mirror = 1;
+                p.x = e[1];
+                p.z = e[2];
+                p.heading = e[3];
+                pedestrians.push(p);
+            }
+            p.mt = { x: e[1], z: e[2], h: e[3], f, recv: now };
+            p.mseen = now;
+            if (f & 8) {
+                if (!p.dead) {
+                    p.x = e[1];
+                    p.z = e[2];
+                    p.deathBaseY = (f & 32) ? 0 : 0.48;
+                    p.deathSide = (f & 16) ? 1 : -1;
+                    p.deadCollisionUntil = $Q + 3;
+                    p.moving = 0;
+                    p.vx = 0;
+                    p.vz = 0;
+                }
+                p.dead = true;
+                p.deadUntil = $Q + 1e6;         // the host decides when it disappears
+            }
+            else if (p.dead && now - (p.mpHitAt || 0) > 1500) {
+                p.dead = false;
+                p.deadUntil = 0;
+            }
+        }
+        for (let i = pedestrians.length - 1; i >= 0; i--) {
+            const p = pedestrians[i];
+            if (p.mirror && now - p.mseen > 1500) {     // the host no longer sends it (gone or far away)
+                p.active = false;
+                p.mirror = 0;
+                p.dead = false;
+                pedestrians.splice(i, 1);
+            }
+        }
+    }
+    // every frame for each mirror pedestrian (instead of the AI): glide towards the host's position
+    function mpPedMirrorStep(p, dt) {
+        const t = p.mt;
+        if (!t) {
+            return;
+        }
+        const k = Math.min(1, 10 * dt);
+        const ox = p.x;
+        const oz = p.z;
+        p.x += (t.x - p.x) * k;
+        p.z += (t.z - p.z) * k;
+        p.heading += (((t.h - p.heading) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) * k - Math.PI * k;
+        p.moving = t.f & 1 ? 1 : 0;
+        p.run = t.f & 2 ? 1 : 0;
+        p.talk = t.f & 4 ? 1 : 0;
+        p.onRoad = t.f & 32 ? 1 : 0;
+        p.vx = (p.x - ox) / Math.max(0.001, dt);
+        p.vz = (p.z - oz) / Math.max(0.001, dt);
+    }
+    // our car ran someone over. Guest: tell the host. (the host's own hits show up in the next message)
+    function mpPedHit(p) {
+        if (!mpGuestPeds() || !p.mirror) {
+            return;
+        }
+        p.mpHitAt = performance.now();
+        TD_NET.send({ t: "ph", id: p.pid });
+    }
+    // host: the guest ran someone over
+    function mpOnPedHit(msg) {
+        if (mpHub.guest) {
+            return;
+        }
+        const p = yQ[msg.id | 0];
+        const v = mp.vehicle;
+        if (!p || !p.active || p.dead || v.off || Math.hypot(p.x - v.x, p.z - v.z) > 20) {
+            return;                              // unknown, already dead, or too far from the guest's car to be real
+        }
+        p.dead = true;
+        p.deadCollisionUntil = $Q + 3;
+        p.deadUntil = $Q + 8;
+        p.deathBaseY = p.onRoad ? 0 : 0.48;
+        p.deathSide = 1 & Math.floor(10 * (p.x + p.z)) ? 1 : -1;
+        p.moving = 0;
+        p.vx = 0;
+        p.vz = 0;
     }
 
     // ---- where is the other car right now? (blend between the two closest positions) ----
@@ -10698,7 +10906,10 @@ function TD_boot() {
             mpSendHello();
             mp.sendTimer = setInterval(mpSendState, MP_SEND_MS);
             if (status.role === "host") {
-                mp.trafficTimer = setInterval(mpSendTraffic, MP_TRAFFIC_MS);
+                mp.trafficTimer = setInterval(() => {
+                    mpSendTraffic();
+                    mpSendPeds();
+                }, MP_TRAFFIC_MS);
                 mp.clockTimer = setInterval(() => TD_NET.send({ t: "clk", clk: TD_CLK, ns: TD_NS }, false), MP_CLOCK_MS);
             }
         }
@@ -11354,6 +11565,7 @@ function TD_boot() {
                 const v = f * g + I * w;
                 if (!(Math.abs(M) > P || Math.abs(v) > Q)) {
                     C.dead = true;
+                    mpPedHit(C);
                     C.deadCollisionUntil = $Q + 3;
                     C.deadUntil = $Q + 8;
                     C.deathBaseY = C.onRoad ? 0 : 0.48;
