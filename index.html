@@ -2697,7 +2697,7 @@ function TD_boot() {
                 });
             }
         }
-        if (bA = B.tr, yA = B.pedN, TA = B.pedR, hA = B.pedR + 4, dQ.N = B.aeN, jA(true), nightReflections.on = B.lit, vf.uNight.value = B.lit ? night.n : 0, document.body.classList.toggle("q-noblur", !B.blur), qualityButton.textContent = qualityLabel(), dynamicRes.aaOff = false, post.setMode(B.aa), NB(true), dP(true), !A) {
+        if (bA = B.tr, yA = Math.min(B.pedN, 50), TA = B.pedR, hA = B.pedR + 4, dQ.N = B.aeN, jA(true), nightReflections.on = B.lit, vf.uNight.value = B.lit ? night.n : 0, document.body.classList.toggle("q-noblur", !B.blur), qualityButton.textContent = qualityLabel(), dynamicRes.aaOff = false, post.setMode(B.aa), NB(true), dP(true), !A) {
             try {
                 localStorage.setItem("taxiQ", autoMode ? "auto" : qualityIndex);
             }
@@ -5556,6 +5556,21 @@ function TD_boot() {
     const dw = [1, 0, -1, 0];
     const lw = [0, 1, 0, -1];
     const xw = [];
+    // [S40] LAN multiplayer hooks used by the traffic code below (filled in by section [S40]).
+    //   guest = this phone is the GUEST: it does not simulate normal traffic, it only draws the host's cars ("mirror" cars).
+    //   vehicle = the other player's car (same object as mp.vehicle).
+    const mpHub = { guest: TD_NET.connected && TD_NET.role !== "host", vehicle: null };
+    let mpSpawnSpec = null;      // {ci, pidx}: make rQ() build this exact car model/paint
+    let mpForceSpawn = false;    // make rQ() skip the distance checks (the mirror car is moved right after)
+    // distance to the NEAREST player (host world spawns and recycles traffic around both players)
+    function mpDistToPlayers(x, z) {
+        let d = Math.hypot(x - car.x, z - car.z);
+        const v = mpHub.vehicle;
+        if (v && !v.off) {
+            d = Math.min(d, Math.hypot(x - v.x, z - v.z));
+        }
+        return d;
+    }
     const decodedCarMeshes = {};
     const yw = 85;
     const Tw = 0.5;
@@ -6910,16 +6925,18 @@ function TD_boot() {
             const s = Lw(C);
             const n = J + dw[C] * Y + s[0] * t;
             const a = G + lw[C] * Y + s[1] * t;
-            const E = Math.hypot(n - car.x, a - car.z);
-            if (E < (B || 35) || !A && E > bA || xw.some(A => Math.hypot(n - A.x, a - A.z) < 16)) {
+            const E = mpDistToPlayers(n, a);
+            if (!mpForceSpawn && (E < (B || 35) || !A && E > bA || xw.some(A => Math.hypot(n - A.x, a - A.z) < 16))) {
                 continue;
             }
-            const c = A ? A.ci : Math.floor(Math.random() * CARS.length);
-            const j = A ? JP(c, A.col, 1) : JP(c, 1 + Math.floor(Math.random() * (PAINT_COLORS.length - 1)));
+            const c = A ? A.ci : mpSpawnSpec ? mpSpawnSpec.ci : Math.floor(Math.random() * CARS.length);
+            const pidx = A ? A.col : mpSpawnSpec ? mpSpawnSpec.pidx : 1 + Math.floor(Math.random() * (PAINT_COLORS.length - 1));
+            const j = A ? JP(c, A.col, 1) : JP(c, pidx);
             const z = A ? A.cr + 2 * (Math.random() - 0.5) : [12.5, 19, 27.5][I] + (Math.random() - 0.5) * [4, 4, 7][I];
-            const i = { cop: A, ci: c, pat: 35 + 35 * Math.random(), ep: bg(c, Math.random() < 0.5), lm: j.lm, rg: j.rg, xm: j.xm, rmT: 0, rev: 0, revCool: 0, jam: 0, jamT: 0, arrK: -1, arrT: 0, dir: 0, dT: 0, role: "chase", sT: 0.25 * Math.random(), sees: 0, alert: 0, pref: v, ln: e, lns: M, dis: 0, dT2: 0, lcT: 3 + 5 * Math.random(), idx: Xw++, px: n, pz: a, jt: 0, x: n, z: a, h: Math.atan2(-dw[C], -lw[C]), v: 0.6 * z, vx: 0, vz: 0, cr: z, lo: t, din: C, n: [D.ni, D.nj], wp: [], p0: [n, a], off: 0, ov: 0, ovT: 0, ob: null, wait: 0, still: 0, L: CARS[c].L, W: CARS[c].W, g: j.g, bg: j.bg, wh: j.wh, sh: j.sh, bm: j.bm, l0: j.l0, l1: j.l1, pc: j.pc, lod: 0 };
+            const i = { cop: A, ci: c, pidx: pidx, pat: 35 + 35 * Math.random(), ep: bg(c, Math.random() < 0.5), lm: j.lm, rg: j.rg, xm: j.xm, rmT: 0, rev: 0, revCool: 0, jam: 0, jamT: 0, arrK: -1, arrT: 0, dir: 0, dT: 0, role: "chase", sT: 0.25 * Math.random(), sees: 0, alert: 0, pref: v, ln: e, lns: M, dis: 0, dT2: 0, lcT: 3 + 5 * Math.random(), idx: Xw++, px: n, pz: a, jt: 0, x: n, z: a, h: Math.atan2(-dw[C], -lw[C]), v: 0.6 * z, vx: 0, vz: 0, cr: z, lo: t, din: C, n: [D.ni, D.nj], wp: [], p0: [n, a], off: 0, ov: 0, ovT: 0, ob: null, wait: 0, still: 0, L: CARS[c].L, W: CARS[c].W, g: j.g, bg: j.bg, wh: j.wh, sh: j.sh, bm: j.bm, l0: j.l0, l1: j.l1, pc: j.pc, lod: 0 };
             zQ(i);
-            return void xw.push(i);
+            xw.push(i);
+            return i;
         }
     }
     const dQ = { N: 6, R: 50, peak: 10, pk: 0.55, hi: 0.45, lo: 0.35, tL: 0, vis: new Set, rx: 1, rz: 0 };
@@ -8980,7 +8997,7 @@ function TD_boot() {
             const t = Lw(Q);
             const o = v + dw[Q] * M + t[0] * f;
             const Y = e + lw[Q] * M + t[1] * f;
-            const J = Math.hypot(o - car.x, Y - car.z);
+            const J = mpDistToPlayers(o, Y);
             if (J < 90 || J > bA) {
                 continue;
             }
@@ -9008,6 +9025,9 @@ function TD_boot() {
         return 0;
     }
     function sC(A) {
+        if (mpHub.guest) {
+            return;      // [S40] the guest does not spawn or recycle traffic: the host owns it
+        }
         if (hw.t -= A, hw.t > 0 || !xw.length) {
             return;
         }
@@ -9019,7 +9039,7 @@ function TD_boot() {
             if (w.cop) {
                 continue;
             }
-            const P = Math.hypot(w.x - car.x, w.z - car.z);
+            const P = mpDistToPlayers(w.x, w.z);
             if ((P > g || w.jam && w.jamT > 45 && P > 140) && GC(w)) {
                 B++;
             }
@@ -9042,7 +9062,7 @@ function TD_boot() {
                     }
                 }
                 else if (B > A) {
-                    const g = xw.filter(A => !A.cop && Math.hypot(A.x - car.x, A.z - car.z) > 130).sort((A, B) => (B.jam ? 1e4 : 0) + Math.hypot(B.x - car.x, B.z - car.z) - ((A.jam ? 1e4 : 0) + Math.hypot(A.x - car.x, A.z - car.z)));
+                    const g = xw.filter(A => !A.cop && mpDistToPlayers(A.x, A.z) > 130).sort((A, B) => (B.jam ? 1e4 : 0) + Math.hypot(B.x - car.x, B.z - car.z) - ((A.jam ? 1e4 : 0) + Math.hypot(A.x - car.x, A.z - car.z)));
                     for (let w = 0; w < Math.min(3, B - A, g.length); w++) {
                         vC(g[w]);
                     }
@@ -9085,7 +9105,7 @@ function TD_boot() {
                 }
             }
         }
-        for (let A = 0, B = MC(); A < B; A++) {
+        for (let A = 0, B = mpHub.guest ? 0 : MC(); A < B; A++) {
             rQ();
         }
         for (const A of COP_TYPES) {
@@ -10241,6 +10261,7 @@ function TD_boot() {
         remote.shadow.material = null;
     }
     function mpRemoveRemote() {
+        mpSetGuest(false);
         if (mp.remote) {
             mpDisposeView(mp.remote);
             mp.remote = null;
@@ -10288,12 +10309,18 @@ function TD_boot() {
         else if (msg.t === "clk") {
             mpSyncClock(msg.clk, msg.ns, false);
         }
+        else if (msg.t === "tr") {
+            mpOnTraffic(msg);
+        }
         else if (msg.t === "bye") {
             mpRemoveRemote();
         }
     }
     function mpOnHello(msg) {
         mpSetRemote(String(msg.name || "Player 2").slice(0, 12), msg.car, msg.paint);
+        if (msg.host) {
+            mpSetGuest(true);       // the other phone is the host: its world replaces ours
+        }
         if (msg.host && !mp.joined) {
             // We are the guest and the host just told us where they are: appear next to them, and use their time of day.
             mp.joined = true;
@@ -10330,6 +10357,141 @@ function TD_boot() {
             if (typeof dusk === "number" && isFinite(dusk)) {
                 TD_NS = dusk;
             }
+        }
+    }
+
+    // ---- [S40] SHARED TRAFFIC (host is the boss) ------------------------------------
+    // HOST: runs all the AI traffic as before, but spawns/recycles cars around BOTH players, and ten times a second sends
+    //       the position of the nearest cars to the guest.   message: { t: "tr", c: [[id, car, paint, x, z, heading, speed], ...] }
+    // GUEST: does not simulate normal traffic. For every car in the message it keeps a "mirror" car (a normal traffic car record,
+    //       so the rest of the game keeps working) whose position is blended towards the host's. Police stay local for now (step 3).
+    const MP_TRAFFIC_MS = 100;
+    const MP_TRAFFIC_MAX = 70;        // most cars sent per message (nearest first)
+    const MP_TRAFFIC_RANGE = 240;     // only cars this close to a player are sent
+    const MP_MIRROR_MAKE_PER_MSG = 6; // building car models is slow: a few per message so the guest never freezes
+    const mpMirror = new Map();       // host car id -> mirror car record
+    mpHub.vehicle = mp.vehicle;
+    function mpSendTraffic() {
+        if (!TD_NET.connected || TD_NET.role !== "host" || !mp.remote) {
+            return;
+        }
+        const list = [];
+        for (const c of xw) {
+            if (c.cop || c.mirror) {
+                continue;
+            }
+            const d = mpDistToPlayers(c.x, c.z);
+            if (d <= MP_TRAFFIC_RANGE) {
+                list.push([d, c]);
+            }
+        }
+        list.sort((a, b) => a[0] - b[0]);
+        if (list.length > MP_TRAFFIC_MAX) {
+            list.length = MP_TRAFFIC_MAX;
+        }
+        TD_NET.send({ t: "tr", c: list.map(e => [e[1].idx, e[1].ci, e[1].pidx, mpRound(e[1].x, 10), mpRound(e[1].z, 10), mpRound(e[1].h, 100), mpRound(e[1].v, 10)]) }, true);
+    }
+    function mpDropMirror(id, record) {
+        if (xw.indexOf(record) >= 0) {
+            vC(record);
+        }
+        mpMirror.delete(id);
+    }
+    function mpClearMirrors() {
+        for (const [id, record] of Array.from(mpMirror)) {
+            mpDropMirror(id, record);
+        }
+    }
+    // turn guest mode on/off. On: our own normal traffic is removed (the host's cars replace it). Off: normal spawning resumes by itself.
+    function mpSetGuest(on) {
+        if (mpHub.guest === on) {
+            return;
+        }
+        mpHub.guest = on;
+        if (on) {
+            for (const c of xw.slice()) {
+                if (!c.cop && !c.mirror) {
+                    vC(c);
+                }
+            }
+        }
+        else {
+            mpClearMirrors();
+        }
+    }
+    function mpOnTraffic(msg) {
+        if (!mpHub.guest || !Array.isArray(msg.c)) {
+            return;
+        }
+        const now = performance.now();
+        let made = 0;
+        for (const e of msg.c) {
+            if (!Array.isArray(e) || e.length < 7) {
+                continue;
+            }
+            const ci = e[1] | 0;
+            const pidx = e[2] | 0;
+            if (ci < 0 || ci >= CARS.length || pidx < 0 || pidx >= PAINT_COLORS.length) {
+                continue;
+            }
+            let record = mpMirror.get(e[0]);
+            if (record && (xw.indexOf(record) < 0 || record.ci !== ci || record.pidx !== pidx)) {
+                mpDropMirror(e[0], record);      // removed by a world reset, or the host reused this id for another car
+                record = null;
+            }
+            if (!record) {
+                if (made >= MP_MIRROR_MAKE_PER_MSG || mpMirror.size >= MP_TRAFFIC_MAX + 20) {
+                    continue;
+                }
+                made++;
+                mpSpawnSpec = { ci, pidx };
+                mpForceSpawn = true;
+                try {
+                    record = rQ(undefined, 0);
+                }
+                finally {
+                    mpSpawnSpec = null;
+                    mpForceSpawn = false;
+                }
+                if (!record) {
+                    continue;
+                }
+                record.mirror = 1;
+                record.x = record.px = e[3];
+                record.z = record.pz = e[4];
+                record.h = e[5];
+                record.v = e[6];
+                mpMirror.set(e[0], record);
+            }
+            record.mt = { x: e[3], z: e[4], h: e[5], v: e[6], recv: now };
+            record.mseen = now;
+        }
+        for (const [id, record] of Array.from(mpMirror)) {
+            if (now - record.mseen > 1500) {
+                mpDropMirror(id, record);        // the host no longer sends it (too far away or gone)
+            }
+        }
+    }
+    // runs every frame for each mirror car (instead of the AI): glide towards the host's latest position and place the model
+    function mpMirrorStep(w, dt) {
+        const t = w.mt;
+        if (t) {
+            const age = Math.min(0.3, (performance.now() - t.recv) / 1000);   // carry on in the same direction until the next message
+            const k = Math.min(1, 10 * dt);
+            w.x += (t.x - Math.sin(t.h) * t.v * age - w.x) * k;
+            w.z += (t.z - Math.cos(t.h) * t.v * age - w.z) * k;
+            w.h += (((t.h - w.h) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) * k - Math.PI * k;
+            w.v += (t.v - w.v) * k;
+        }
+        w.vx = -Math.sin(w.h) * w.v;
+        w.vz = -Math.cos(w.h) * w.v;
+        w.still = w.v < 0.5 ? w.still + dt : 0;
+        w.g.position.set(w.x, LD(w), w.z);
+        w.g.rotation.y = w.h;
+        w.sh.position.set(w.x, 0.14 + O(w.x, w.z), w.z);
+        w.sh.rotation.y = w.h;
+        for (const wheel of w.wh) {
+            wheel.m.rotation.x += w.v * dt / wheel.r;
         }
     }
 
@@ -10524,16 +10686,19 @@ function TD_boot() {
     function mpStopTimers() {
         clearInterval(mp.sendTimer);
         clearInterval(mp.clockTimer);
-        mp.sendTimer = mp.clockTimer = 0;
+        clearInterval(mp.trafficTimer);
+        mp.sendTimer = mp.clockTimer = mp.trafficTimer = 0;
     }
     function mpOnStatus(status) {
         mpStopTimers();
+        mpSetGuest(!!status.connected && status.role !== "host");
         if (status.connected) {
             mp.seq = 0;
             mp.joined = false;
             mpSendHello();
             mp.sendTimer = setInterval(mpSendState, MP_SEND_MS);
             if (status.role === "host") {
+                mp.trafficTimer = setInterval(mpSendTraffic, MP_TRAFFIC_MS);
                 mp.clockTimer = setInterval(() => TD_NET.send({ t: "clk", clk: TD_CLK, ns: TD_NS }, false), MP_CLOCK_MS);
             }
         }
@@ -10754,6 +10919,9 @@ function TD_boot() {
             wC.clear();
             const D = [];
             for (const A of xw) {
+                if (A.mirror) {
+                    continue;
+                }
                 if (A.dir) {
                     D.push(A);
                     continue;
@@ -10777,6 +10945,10 @@ function TD_boot() {
                 }
             }
             for (const w of xw) {
+                if (w.mirror) {
+                    mpMirrorStep(w, A);     // [S40] guest: follow the host's snapshots
+                    continue;
+                }
                 if (w.cop && $P(w, B, A), w.dir) {
                     _P(w, A, g);
                     continue;
